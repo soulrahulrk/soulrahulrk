@@ -11,19 +11,34 @@ export const useGitHub = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let mounted = true;
+    
     const fetchData = async () => {
       try {
         setLoading(true);
         const stats = await fetchGitHubStats();
-        setData(stats);
+        
+        if (mounted) {
+          setData(stats);
+          setError(null);
+        }
       } catch (err) {
-        setError(err.message);
+        console.warn('GitHub fetch error:', err.message);
+        if (mounted) {
+          setError(err.message);
+        }
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchData();
+    
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return { data, loading, error };
@@ -38,10 +53,15 @@ export const useProjects = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+    
     const fetchProjects = async () => {
       try {
         setLoading(true);
         const githubRepos = await fetchGitHubRepos(30);
+        
+        if (!mounted) return;
+        
         setRepos(githubRepos);
         
         // Enhance featured projects with GitHub data if available
@@ -65,15 +85,23 @@ export const useProjects = () => {
           return project;
         });
         
-        setProjects(enhancedProjects);
+        if (mounted) {
+          setProjects(enhancedProjects);
+        }
       } catch (err) {
-        console.error('Error fetching projects:', err);
+        console.warn('Error fetching projects:', err.message);
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchProjects();
+    
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return { projects, repos, loading };

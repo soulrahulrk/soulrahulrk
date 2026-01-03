@@ -1,6 +1,7 @@
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_USERNAME = import.meta.env.VITE_GITHUB_USERNAME || 'soulrahulrk';
 const GITHUB_TOKEN = import.meta.env.VITE_GITHUB_TOKEN;
+const TIMEOUT = 10000; // 10 seconds
 
 // Headers for GitHub API requests
 const getHeaders = () => {
@@ -16,11 +17,34 @@ const getHeaders = () => {
 };
 
 /**
+ * Fetch with timeout and retry
+ */
+const fetchWithTimeout = async (url, options = {}, timeout = TIMEOUT) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout');
+    }
+    throw error;
+  }
+};
+
+/**
  * Fetch user profile from GitHub
  */
 export const fetchGitHubProfile = async () => {
   try {
-    const response = await fetch(`${GITHUB_API}/users/${GITHUB_USERNAME}`, {
+    const response = await fetchWithTimeout(`${GITHUB_API}/users/${GITHUB_USERNAME}`, {
       headers: getHeaders(),
     });
     
@@ -30,7 +54,7 @@ export const fetchGitHubProfile = async () => {
     
     return await response.json();
   } catch (error) {
-    console.error('Error fetching GitHub profile:', error);
+    console.error('Error fetching GitHub profile:', error.message);
     return null;
   }
 };
@@ -40,7 +64,7 @@ export const fetchGitHubProfile = async () => {
  */
 export const fetchGitHubRepos = async (perPage = 30) => {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${GITHUB_API}/users/${GITHUB_USERNAME}/repos?per_page=${perPage}&sort=updated&direction=desc`,
       { headers: getHeaders() }
     );
@@ -54,7 +78,7 @@ export const fetchGitHubRepos = async (perPage = 30) => {
     // Filter out forks and empty repos
     return repos.filter((repo) => !repo.fork && repo.description);
   } catch (error) {
-    console.error('Error fetching GitHub repos:', error);
+    console.error('Error fetching GitHub repos:', error.message);
     return [];
   }
 };

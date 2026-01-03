@@ -1,139 +1,116 @@
 import { leetcodeStats as fallbackStats } from '../data/content';
 
-// LeetCode GraphQL API endpoint (CORS proxy needed for browser)
-const LEETCODE_API = 'https://leetcode.com/graphql';
 const USERNAME = 'j5Fa0igpi6';
-
-// Since LeetCode doesn't have a public API with CORS support,
-// we'll use a combination of approaches
+const TIMEOUT = 8000; // 8 seconds timeout
+const MAX_RETRIES = 2;
 
 /**
- * Fetch LeetCode stats using a CORS proxy or server-side endpoint
- * Falls back to static data if API is unavailable
+ * Fetch with timeout
+ */
+const fetchWithTimeout = async (url, options = {}, timeout = TIMEOUT) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+};
+
+/**
+ * Try multiple LeetCode API endpoints with retry logic
+ */
+const tryLeetCodeAPIs = async () => {
+  const apis = [
+    {
+      name: 'alfa-leetcode-api',
+      url: `https://alfa-leetcode-api.onrender.com/${USERNAME}/solved`,
+      parser: (data) => ({
+        totalSolved: data.solvedProblem || 0,
+        ranking: data.ranking || null,
+        breakdown: {
+          easy: { solved: data.easySolved || 0, total: 800 },
+          medium: { solved: data.mediumSolved || 0, total: 1700 },
+          hard: { solved: data.hardSolved || 0, total: 750 },
+        },
+      }),
+    },
+    {
+      name: 'leetcode-stats-api',
+      url: `https://leetcode-stats-api.herokuapp.com/${USERNAME}`,
+      parser: (data) => ({
+        totalSolved: data.totalSolved || 0,
+        ranking: data.ranking || null,
+        breakdown: {
+          easy: { solved: data.easySolved || 0, total: data.totalEasy || 800 },
+          medium: { solved: data.mediumSolved || 0, total: data.totalMedium || 1700 },
+          hard: { solved: data.hardSolved || 0, total: data.totalHard || 750 },
+        },
+      }),
+    },
+  ];
+
+  for (const api of apis) {
+    for (let retry = 0; retry < MAX_RETRIES; retry++) {
+      try {
+        const response = await fetchWithTimeout(api.url, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        if (data.status === 'error') continue;
+
+        const parsed = api.parser(data);
+        if (parsed.totalSolved > 0) {
+          return {
+            username: USERNAME,
+            ...parsed,
+            ...fallbackStats,
+            totalSolved: parsed.totalSolved,
+            breakdown: parsed.breakdown,
+          };
+        }
+      } catch (error) {
+        if (retry === MAX_RETRIES - 1) {
+          console.warn(`Failed ${api.name}:`, error.message);
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Fetch LeetCode stats with fallback to static data
  */
 export const fetchLeetCodeStats = async () => {
   try {
-    // Try fetching from a public LeetCode stats API
-    // These are community-maintained endpoints
-    const response = await fetch(
-      `https://leetcode-stats-api.herokuapp.com/${USERNAME}`,
-      { 
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-      }
-    );
+    const apiData = await tryLeetCodeAPIs();
+    if (apiData) return apiData;
     
-    if (!response.ok) {
-      throw new Error('LeetCode API unavailable');
-    }
-    
-    const data = await response.json();
-    
-    if (data.status === 'error') {
-      throw new Error(data.message);
-    }
-    
-    return {
-      username: USERNAME,
-      totalSolved: data.totalSolved || fallbackStats.totalSolved,
-      ranking: data.ranking || fallbackStats.ranking,
-      breakdown: {
-        easy: { 
-          solved: data.easySolved || fallbackStats.breakdown.easy.solved, 
-          total: data.totalEasy || fallbackStats.breakdown.easy.total 
-        },
-        medium: { 
-          solved: data.mediumSolved || fallbackStats.breakdown.medium.solved, 
-          total: data.totalMedium || fallbackStats.breakdown.medium.total 
-        },
-        hard: { 
-          solved: data.hardSolved || fallbackStats.breakdown.hard.solved, 
-          total: data.totalHard || fallbackStats.breakdown.hard.total 
-        },
-      },
-      acceptanceRate: data.acceptanceRate || null,
-      contributionPoints: data.contributionPoints || null,
-    };
+    throw new Error('All LeetCode APIs failed');
   } catch (error) {
-    console.warn('Using fallback LeetCode stats:', error.message);
-    
-    // Return fallback static data
-    return {
-      ...fallbackStats,
-      isStatic: true,
-    };
+    console.warn('Using static LeetCode stats:', error.message);
+    return { ...fallbackStats, isStatic: true };
   }
 };
 
 /**
- * Alternative: Try LeetCode-CN API which sometimes has better availability
- */
-export const fetchLeetCodeStatsAlt = async () => {
-  try {
-    // Try alfa-leetcode-api (another community API)
-    const response = await fetch(
-      `https://alfa-leetcode-api.onrender.com/${USERNAME}/solved`,
-      {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-      }
-    );
-    
-    if (!response.ok) {
-      throw new Error('Alternative LeetCode API unavailable');
-    }
-    
-    const data = await response.json();
-    
-    return {
-      username: USERNAME,
-      totalSolved: data.solvedProblem || fallbackStats.totalSolved,
-      ranking: data.ranking || fallbackStats.ranking,
-      breakdown: {
-        easy: { 
-          solved: data.easySolved || fallbackStats.breakdown.easy.solved, 
-          total: data.totalEasy || 800 
-        },
-        medium: { 
-          solved: data.mediumSolved || fallbackStats.breakdown.medium.solved, 
-          total: data.totalMedium || 1700 
-        },
-        hard: { 
-          solved: data.hardSolved || fallbackStats.breakdown.hard.solved, 
-          total: data.totalHard || 750 
-        },
-      },
-    };
-  } catch (error) {
-    console.warn('Alternative API also failed:', error.message);
-    return null;
-  }
-};
-
-/**
- * Main function to get LeetCode stats with multiple fallbacks
+ * Main export that always returns data (either from API or fallback)
  */
 export const getLeetCodeStats = async () => {
-  // Try primary API first
-  let stats = await fetchLeetCodeStats();
-  
-  // If primary fails, try alternative
-  if (stats.isStatic) {
-    const altStats = await fetchLeetCodeStatsAlt();
-    if (altStats && !altStats.isStatic) {
-      stats = altStats;
-    }
-  }
-  
-  return stats;
+  return await fetchLeetCodeStats();
 };
 
-export default {
-  fetchLeetCodeStats,
-  fetchLeetCodeStatsAlt,
-  getLeetCodeStats,
-};
+export default getLeetCodeStats;
